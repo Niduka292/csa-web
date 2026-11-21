@@ -4,7 +4,7 @@ import React, { useEffect, useRef } from 'react';
  * FlockLogoCanvas:
  * A seamless, full-bleed centerpiece canvas integrated directly into the Hero section.
  * Renders a murmuration flock of glowing dot particles flying organically across the hero stage
- * and smoothly converging into the centered "CSA" formation.
+ * and smoothly converging into the official CSA emblem + "CSA" formation.
  */
 export default function FlockLogoCanvas() {
   const canvasRef = useRef(null);
@@ -14,12 +14,15 @@ export default function FlockLogoCanvas() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d', { alpha: true });
 
+    let isCancelled = false;
     let animationFrameId;
     let width = 0;
     let height = 0;
     let particles = [];
     let startTime = performance.now();
     let scatterImpulseTime = -9999;
+    let loadedIconImg = null;
+    let loadedBrainImg = null;
     let mouse = {
       x: -9999,
       y: -9999,
@@ -35,46 +38,213 @@ export default function FlockLogoCanvas() {
     const easeInOutCubic = (t) =>
       t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
-    // Sample points for a large, centered "CSA" across the hero stage
-    const generateCSATargets = (w, h) => {
-      const offCanvas = document.createElement('canvas');
-      offCanvas.width = w;
-      offCanvas.height = h;
-      const offCtx = offCanvas.getContext('2d');
+    const downsamplePoints = (points, maxCount) => {
+      if (points.length <= maxCount) return points;
+      const sampled = [];
+      const ratio = points.length / maxCount;
+      for (let i = 0; i < maxCount; i++) {
+        sampled.push(points[Math.floor(i * ratio)]);
+      }
+      return sampled;
+    };
 
-      offCtx.clearRect(0, 0, w, h);
-
-      // Large, commanding centered CSA letters
-      const fontSize = Math.min(w * 0.34, h * 0.62, 330);
-      offCtx.fillStyle = '#ffffff';
-      offCtx.textAlign = 'center';
-      offCtx.textBaseline = 'middle';
-      offCtx.font = `800 ${fontSize}px "Plus Jakarta Sans", "Inter", sans-serif`;
-
-      const centerX = w / 2;
-      const centerY = h * 0.5;
-
-      offCtx.fillText('CSA', centerX, centerY);
-
+    const sampleTextTargets = (offCtx, w, h, step, jitter, maxCount) => {
       const imgData = offCtx.getImageData(0, 0, w, h).data;
-      const step = w < 640 ? 5 : 6;
       const points = [];
 
       for (let y = 0; y < h; y += step) {
         for (let x = 0; x < w; x += step) {
           const idx = (y * w + x) * 4;
-          if (imgData[idx + 3] > 140) {
+          if (imgData[idx + 3] > 125) {
             points.push({
-              x: x + (Math.random() - 0.5) * 1.8,
-              y: y + (Math.random() - 0.5) * 1.8,
+              x: x + (Math.random() - 0.5) * jitter,
+              y: y + (Math.random() - 0.5) * jitter,
+              isIcon: false,
+              isBrain: false,
+              isRibbonAccent: false,
             });
           }
         }
       }
-      return points;
+
+      return downsamplePoints(points, maxCount);
+    };
+
+    const sampleOuterIconTargets = (offCtx, w, h, centerX, centerY, iconSize, isMobile) => {
+      const imgData = offCtx.getImageData(0, 0, w, h).data;
+      const brainThreshold = iconSize * 0.2;
+      const outerStep = isMobile ? 4 : 5;
+      const minX = Math.max(0, Math.floor(centerX - iconSize / 2));
+      const maxX = Math.min(w - 1, Math.ceil(centerX + iconSize / 2));
+      const minY = Math.max(0, Math.floor(centerY - iconSize / 2));
+      const maxY = Math.min(h - 1, Math.ceil(centerY + iconSize / 2));
+
+      const outerPoints = [];
+
+      for (let y = minY; y <= maxY; y += outerStep) {
+        for (let x = minX; x <= maxX; x += outerStep) {
+          const diamondDist = Math.abs(x - centerX) + Math.abs(y - centerY);
+          if (diamondDist < brainThreshold) continue;
+
+          const idx = (y * w + x) * 4;
+          if (imgData[idx + 3] > 125) {
+            const r = imgData[idx];
+            const b = imgData[idx + 2];
+            outerPoints.push({
+              x: x + (Math.random() - 0.5) * 1.1,
+              y: y + (Math.random() - 0.5) * 1.1,
+              isIcon: true,
+              isBrain: false,
+              isRibbonAccent: b - r > 15,
+            });
+          }
+        }
+      }
+
+      return downsamplePoints(outerPoints, isMobile ? 250 : 480);
+    };
+
+    const sampleBrainBubbleTargets = (offCtx, w, h, centerX, centerY, iconSize, isMobile) => {
+      const imgData = offCtx.getImageData(0, 0, w, h).data;
+      const halfBox = Math.ceil(iconSize * 0.28);
+      const minX = Math.max(0, Math.floor(centerX - halfBox));
+      const maxX = Math.min(w - 1, Math.ceil(centerX + halfBox));
+      const minY = Math.max(0, Math.floor(centerY - halfBox));
+      const maxY = Math.min(h - 1, Math.ceil(centerY + halfBox));
+
+      const candidates = [];
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          const idx = (y * w + x) * 4;
+          const alpha = imgData[idx + 3];
+          if (alpha > 90) {
+            candidates.push({ x, y, alpha });
+          }
+        }
+      }
+
+      // Prioritize highest-alpha centerline pixels so bubbles trace the brain folds cleanly
+      candidates.sort((a, b) => b.alpha - a.alpha);
+
+      const minDist = isMobile ? 3.5 : 4.2;
+      const minDistSq = minDist * minDist;
+      const selected = [];
+
+      for (let i = 0; i < candidates.length; i++) {
+        const c = candidates[i];
+        let tooClose = false;
+        for (let j = selected.length - 1; j >= 0; j--) {
+          const dx = c.x - selected[j].x;
+          const dy = c.y - selected[j].y;
+          if (dx * dx + dy * dy < minDistSq) {
+            tooClose = true;
+            break;
+          }
+        }
+        if (!tooClose) {
+          selected.push({
+            x: c.x,
+            y: c.y,
+            isIcon: true,
+            isBrain: true,
+            isRibbonAccent: false,
+          });
+        }
+      }
+
+      return selected;
+    };
+
+    // Sample points for the centered [Official CSA Icon] + "CSA" lockup
+    const generateCSATargets = (w, h, iconImg, brainImg) => {
+      const cw = Math.max(1, Math.floor(w));
+      const ch = Math.max(1, Math.floor(h));
+      const offCanvas = document.createElement('canvas');
+      offCanvas.width = cw;
+      offCanvas.height = ch;
+      const offCtx = offCanvas.getContext('2d');
+
+      let fontSize = Math.min(cw * 0.25, ch * 0.56, 270);
+      offCtx.font = `800 ${fontSize}px "Plus Jakarta Sans", "Inter", sans-serif`;
+      let textWidth = offCtx.measureText('CSA').width;
+      let iconSize = iconImg ? fontSize * 0.98 : 0;
+      let gap = iconImg ? fontSize * 0.16 : 0;
+      let totalWidth = iconSize + gap + textWidth;
+
+      const maxLockupWidth = cw * 0.9;
+      if (totalWidth > maxLockupWidth && totalWidth > 0) {
+        const scale = maxLockupWidth / totalWidth;
+        fontSize *= scale;
+        iconSize *= scale;
+        gap *= scale;
+        offCtx.font = `800 ${fontSize}px "Plus Jakarta Sans", "Inter", sans-serif`;
+        textWidth = offCtx.measureText('CSA').width;
+        totalWidth = iconSize + gap + textWidth;
+      }
+
+      const startX = (cw - totalWidth) / 2;
+      const centerY = ch * 0.5;
+      const iconCenterX = startX + iconSize / 2;
+      const isMobile = cw < 640;
+
+      let iconPoints = [];
+      if (iconImg) {
+        offCtx.clearRect(0, 0, cw, ch);
+        offCtx.drawImage(iconImg, startX, centerY - iconSize / 2, iconSize, iconSize);
+        iconPoints = sampleOuterIconTargets(
+          offCtx,
+          cw,
+          ch,
+          iconCenterX,
+          centerY,
+          iconSize,
+          isMobile
+        );
+      }
+
+      let brainPoints = [];
+      if (brainImg) {
+        const brainDrawSize = iconSize * 1.04;
+        offCtx.clearRect(0, 0, cw, ch);
+        offCtx.drawImage(
+          brainImg,
+          iconCenterX - brainDrawSize / 2,
+          centerY - brainDrawSize / 2,
+          brainDrawSize,
+          brainDrawSize
+        );
+        brainPoints = sampleBrainBubbleTargets(
+          offCtx,
+          cw,
+          ch,
+          iconCenterX,
+          centerY,
+          iconSize,
+          isMobile
+        );
+      }
+
+      offCtx.clearRect(0, 0, cw, ch);
+      offCtx.fillStyle = '#ffffff';
+      offCtx.textAlign = 'left';
+      offCtx.textBaseline = 'middle';
+      offCtx.font = `800 ${fontSize}px "Plus Jakarta Sans", "Inter", sans-serif`;
+      offCtx.fillText('CSA', startX + iconSize + gap, centerY + fontSize * 0.03);
+
+      const textPoints = sampleTextTargets(
+        offCtx,
+        cw,
+        ch,
+        isMobile ? 5 : 6,
+        1.7,
+        isMobile ? 400 : 720
+      );
+
+      return [...iconPoints, ...brainPoints, ...textPoints];
     };
 
     const initScene = () => {
+      if (isCancelled || !canvas.parentElement) return;
       const rect = canvas.parentElement.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = rect.width;
@@ -84,25 +254,15 @@ export default function FlockLogoCanvas() {
       canvas.height = height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      const rawTargets = generateCSATargets(width, height);
+      const selectedTargets = generateCSATargets(width, height, loadedIconImg, loadedBrainImg);
 
-      const maxDots = width < 640 ? 520 : 880;
-      let selectedTargets = rawTargets;
-      if (rawTargets.length > maxDots) {
-        selectedTargets = [];
-        const ratio = rawTargets.length / maxDots;
-        for (let i = 0; i < maxDots; i++) {
-          selectedTargets.push(rawTargets[Math.floor(i * ratio)]);
-        }
-      }
-
-      // Sort targets from left-to-right so the flock flows smoothly into C -> S -> A
+      // Sort targets from left-to-right so the flock flows smoothly into [Icon] -> C -> S -> A
       selectedTargets.sort((a, b) => a.x - b.x);
 
       const palette = ['#ffffff', '#f8fafc', '#e0f2fe', '#bae6fd', '#7dd3fc', '#38bdf8'];
 
       particles = selectedTargets.map((t, i) => {
-        const progressRatio = i / selectedTargets.length;
+        const progressRatio = i / Math.max(1, selectedTargets.length);
         const flockCluster = i % 3;
         let startX, startY, initAngle;
 
@@ -140,8 +300,6 @@ export default function FlockLogoCanvas() {
 
       startTime = performance.now();
     };
-
-    initScene();
 
     const drawDotParticle = (p, tSec) => {
       const pulse = 1 + Math.sin(tSec * 3 + p.pulsePhase) * 0.12;
@@ -318,10 +476,32 @@ export default function FlockLogoCanvas() {
       animationFrameId = requestAnimationFrame(animate);
     };
 
-    animationFrameId = requestAnimationFrame(animate);
+    const loadImage = (src) =>
+      new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = src;
+      });
+
+    const fontsReady = document.fonts ? document.fonts.ready : Promise.resolve();
+
+    Promise.all([loadImage('/csa-icon.png'), loadImage('/csa-brain.png'), fontsReady]).then(
+      ([iconImg, brainImg]) => {
+        if (isCancelled) return;
+        loadedIconImg = iconImg;
+        loadedBrainImg = brainImg;
+        initScene();
+        animationFrameId = requestAnimationFrame(animate);
+      }
+    );
 
     const handleResize = () => {
-      initScene();
+      if (!canvas.parentElement) return;
+      const newWidth = canvas.parentElement.getBoundingClientRect().width;
+      if (Math.abs(newWidth - width) > 2) {
+        initScene();
+      }
     };
 
     const handleMouseMove = (e) => {
@@ -366,6 +546,7 @@ export default function FlockLogoCanvas() {
     canvas.addEventListener('click', handleClick);
 
     return () => {
+      isCancelled = true;
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
       canvas.removeEventListener('mousemove', handleMouseMove);
