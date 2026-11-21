@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import Navbar from './components/Navbar';
 import FlockLogoCanvas from './components/FlockLogoCanvas';
+import DepartmentMap3D, { DCS_MAPS_LINK } from './components/DepartmentMap3D';
 import { VISION_PILLARS, EVENTS_GALLERY, OFFICE_BEARERS } from './data/csaData';
 
 const GALLERY_CATEGORIES = ['All', 'Hackathon', 'Symposium', 'Competition', 'Workshop', 'Networking', 'CSR Outreach'];
@@ -573,6 +574,15 @@ export default function App() {
                       Faculty of Applied Sciences,<br />
                       University of Sri Jayewardenepura, Gangodawila, Nugegoda, Sri Lanka.
                     </p>
+                    <a
+                      href={DCS_MAPS_LINK}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-mono text-sky-400 hover:text-sky-300 mt-2"
+                    >
+                      <span>View on Google Maps</span>
+                      <ArrowUpRight className="w-3.5 h-3.5" />
+                    </a>
                   </div>
                 </div>
 
@@ -721,6 +731,11 @@ export default function App() {
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Google Maps Terrain */}
+          <div className="mt-12">
+            <DepartmentMap3D />
           </div>
         </div>
       </section>
