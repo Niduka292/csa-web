@@ -23,6 +23,10 @@ export default function FlockLogoCanvas() {
     let maxSynapseRenderDistSq = 900;
     let startTime = performance.now();
     let scatterImpulseTime = -9999;
+    let sweepStartTime = -1;
+    let sweepArmed = true;
+    let lockupMinX = 0;
+    let lockupWidth = 1;
     let loadedIconImg = null;
     let loadedBrainImg = null;
     let mouse = {
@@ -369,6 +373,10 @@ export default function FlockLogoCanvas() {
       });
 
       brainLinks = buildBrainSynapseLinks(particles, iconSize);
+      lockupMinX = particles[0]?.tx ?? 0;
+      lockupWidth = Math.max(1, (particles[particles.length - 1]?.tx ?? width) - lockupMinX);
+      sweepStartTime = -1;
+      sweepArmed = true;
       startTime = performance.now();
     };
 
@@ -420,13 +428,19 @@ export default function FlockLogoCanvas() {
       ctx.globalAlpha = 1;
     };
 
-    const drawParticle = (p, tSec) => {
+    const drawParticle = (p, tSec, sweepCenterX) => {
       const speed = Math.hypot(p.vx, p.vy);
       const birdAmount = 1 - p.morph;
 
-      // Gentle left-to-right shimmer wave across the settled CSA formation
-      const waveRaw = Math.sin(tSec * 2.1 - p.tx * 0.011);
-      const shimmer = Math.pow(Math.max(0, waveRaw), 7) * p.morph;
+      // Single left-to-right light sweep triggered once after motion completes
+      let shimmer = 0;
+      if (sweepCenterX > -90000) {
+        const dist = Math.abs(p.tx - sweepCenterX);
+        const bandHalfWidth = 75;
+        if (dist < bandHalfWidth) {
+          shimmer = Math.pow(Math.cos((dist / bandHalfWidth) * (Math.PI / 2)), 2) * p.morph;
+        }
+      }
 
       const pulse = 1 + Math.sin(tSec * 3 + p.pulsePhase) * 0.12;
       const r = p.radius * pulse * (1 + shimmer * 0.38);
@@ -576,6 +590,8 @@ export default function FlockLogoCanvas() {
       const leader2X = width * 0.5 + Math.cos(tSec * 0.95 + Math.PI) * (width * 0.26);
       const leader2Y = height * 0.5 + Math.sin(tSec * 1.45 + Math.PI) * (height * 0.22);
 
+      let settledCount = 0;
+
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i];
 
@@ -687,12 +703,32 @@ export default function FlockLogoCanvas() {
             ? Math.min(1, (1 - distT / 45) * formationStrength)
             : 0;
         p.morph += (proximityMorph - p.morph) * 0.065;
+        if (p.morph >= 0.92) settledCount++;
       }
+
+      // Trigger one left-to-right light sweep only after motion fully completes
+      if (isFreeFlocking || (particles.length > 0 && settledCount < particles.length * 0.92)) {
+        sweepArmed = true;
+      } else if (
+        sweepArmed &&
+        particles.length > 0 &&
+        settledCount >= particles.length * 0.985
+      ) {
+        sweepStartTime = now;
+        sweepArmed = false;
+      }
+
+      const sweepDuration = 2200;
+      const sweepElapsed = sweepStartTime >= 0 ? now - sweepStartTime : -1;
+      const sweepCenterX =
+        sweepElapsed >= 0 && sweepElapsed <= sweepDuration
+          ? lockupMinX - 90 + (sweepElapsed / sweepDuration) * (lockupWidth + 180)
+          : -99999;
 
       drawBrainSynapses(tSec);
 
       for (let i = 0; i < particles.length; i++) {
-        drawParticle(particles[i], tSec);
+        drawParticle(particles[i], tSec, sweepCenterX);
       }
 
       animationFrameId = requestAnimationFrame(animate);
@@ -753,6 +789,8 @@ export default function FlockLogoCanvas() {
 
     const handleClick = () => {
       scatterImpulseTime = performance.now();
+      sweepStartTime = -1;
+      sweepArmed = true;
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i];
         const angle = Math.atan2(p.vy, p.vx) + (Math.random() - 0.5) * 1.2;
