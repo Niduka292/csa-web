@@ -19,6 +19,8 @@ export default function FlockLogoCanvas() {
     let width = 0;
     let height = 0;
     let particles = [];
+    let brainLinks = [];
+    let maxSynapseRenderDistSq = 900;
     let startTime = performance.now();
     let scatterImpulseTime = -9999;
     let loadedIconImg = null;
@@ -240,7 +242,63 @@ export default function FlockLogoCanvas() {
         isMobile ? 400 : 720
       );
 
-      return [...iconPoints, ...brainPoints, ...textPoints];
+      return {
+        targets: [...iconPoints, ...brainPoints, ...textPoints],
+        iconSize,
+      };
+    };
+
+    /** Precompute static nearest-neighbor links across settled brain fold nodes. */
+    const buildBrainSynapseLinks = (particleList, iconSize) => {
+      const brainIndices = [];
+      for (let i = 0; i < particleList.length; i++) {
+        if (particleList[i].isBrain) brainIndices.push(i);
+      }
+      if (brainIndices.length < 2) return [];
+
+      const maxLinkDist = Math.max(14, (iconSize || 160) * 0.085);
+      const maxLinkDistSq = maxLinkDist * maxLinkDist;
+      maxSynapseRenderDistSq = Math.pow(maxLinkDist * 1.45, 2);
+
+      const seen = new Set();
+      const links = [];
+
+      for (let i = 0; i < brainIndices.length; i++) {
+        const idxA = brainIndices[i];
+        const pa = particleList[idxA];
+        const neighbors = [];
+
+        for (let j = 0; j < brainIndices.length; j++) {
+          if (i === j) continue;
+          const idxB = brainIndices[j];
+          const pb = particleList[idxB];
+          const dx = pa.tx - pb.tx;
+          const dy = pa.ty - pb.ty;
+          const dSq = dx * dx + dy * dy;
+          if (dSq > 0 && dSq <= maxLinkDistSq) {
+            neighbors.push({ idxB, dSq });
+          }
+        }
+
+        neighbors.sort((u, v) => u.dSq - v.dSq);
+        const count = Math.min(3, neighbors.length);
+        for (let k = 0; k < count; k++) {
+          const idxB = neighbors[k].idxB;
+          const key = idxA < idxB ? `${idxA}-${idxB}` : `${idxB}-${idxA}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            links.push({
+              a: idxA,
+              b: idxB,
+              phase: Math.random() * Math.PI * 2,
+              pulseSpeed: 0.65 + Math.random() * 0.85,
+              hasPulse: links.length % 3 === 0,
+            });
+          }
+        }
+      }
+
+      return links;
     };
 
     const initScene = () => {
@@ -254,7 +312,12 @@ export default function FlockLogoCanvas() {
       canvas.height = height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      const selectedTargets = generateCSATargets(width, height, loadedIconImg, loadedBrainImg);
+      const { targets: selectedTargets, iconSize } = generateCSATargets(
+        width,
+        height,
+        loadedIconImg,
+        loadedBrainImg
+      );
 
       // Sort targets from left-to-right so the flock flows smoothly into [Icon] -> C -> S -> A
       selectedTargets.sort((a, b) => a.x - b.x);
@@ -289,34 +352,189 @@ export default function FlockLogoCanvas() {
           vy: Math.sin(initAngle) * speed,
           tx: t.x,
           ty: t.y,
+          isIcon: !!t.isIcon,
+          isBrain: !!t.isBrain,
+          isRibbonAccent: !!t.isRibbonAccent,
           formationDelay: progressRatio * 1100 + Math.random() * 450,
-          color: palette[i % palette.length],
-          radius: 1.6 + Math.random() * 1.35,
+          color: t.isRibbonAccent
+            ? '#38bdf8'
+            : t.isBrain
+            ? '#bae6fd'
+            : palette[i % palette.length],
+          radius: t.isBrain ? 1.55 + Math.random() * 0.9 : 1.6 + Math.random() * 1.35,
           pulsePhase: Math.random() * Math.PI * 2,
           maxSpeed: 3.2 + Math.random() * 1.1,
           morph: 0,
         };
       });
 
+      brainLinks = buildBrainSynapseLinks(particles, iconSize);
       startTime = performance.now();
     };
 
-    const drawDotParticle = (p, tSec) => {
+    const drawBrainSynapses = (tSec) => {
+      if (brainLinks.length === 0) return;
+
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 0.85;
+
+      for (let i = 0; i < brainLinks.length; i++) {
+        const link = brainLinks[i];
+        const pa = particles[link.a];
+        const pb = particles[link.b];
+        const linkMorph = Math.min(pa.morph, pb.morph);
+        if (linkMorph < 0.35) continue;
+
+        const dx = pb.x - pa.x;
+        const dy = pb.y - pa.y;
+        if (dx * dx + dy * dy > maxSynapseRenderDistSq) continue;
+
+        const pulse = 0.5 + 0.5 * Math.sin(tSec * 2.3 + link.phase);
+        ctx.strokeStyle = '#38bdf8';
+        ctx.globalAlpha = linkMorph * (0.13 + pulse * 0.24);
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.stroke();
+
+        // Traveling synaptic signal spark along settled brain fold edges
+        if (link.hasPulse && linkMorph > 0.7) {
+          const u = (tSec * link.pulseSpeed + link.phase) % 1;
+          const sx = pa.x + dx * u;
+          const sy = pa.y + dy * u;
+
+          ctx.fillStyle = '#7dd3fc';
+          ctx.globalAlpha = linkMorph * 0.35;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.globalAlpha = linkMorph * 0.85;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 1.05, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.globalAlpha = 1;
+    };
+
+    const drawParticle = (p, tSec) => {
+      const speed = Math.hypot(p.vx, p.vy);
+      const birdAmount = 1 - p.morph;
+
+      // Gentle left-to-right shimmer wave across the settled CSA formation
+      const waveRaw = Math.sin(tSec * 2.1 - p.tx * 0.011);
+      const shimmer = Math.pow(Math.max(0, waveRaw), 7) * p.morph;
+
       const pulse = 1 + Math.sin(tSec * 3 + p.pulsePhase) * 0.12;
-      const r = p.radius * pulse;
+      const r = p.radius * pulse * (1 + shimmer * 0.38);
 
-      // Soft outer halo for bright cyan/white dots
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = 0.22 + p.morph * 0.12;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r * 2.1, 0, Math.PI * 2);
-      ctx.fill();
+      // Moving state: sideways flying bird silhouette with full up/down wingbeat, glide, and body bob
+      if (birdAmount > 0.04) {
+        const facing = p.vx < 0 ? -1 : 1;
+        const flapPhase = tSec * (8.5 + speed * 1.1) + p.pulsePhase;
+        const glideWave = 0.65 + 0.35 * Math.sin(tSec * 1.4 + p.pulsePhase * 1.7);
+        const stroke = Math.sin(flapPhase) * glideWave + (1 - glideWave) * 0.55;
 
-      // Crisp dot core
-      ctx.globalAlpha = 0.88 + p.morph * 0.12;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      ctx.fill();
+        const up = Math.max(0, stroke);
+        const down = Math.max(0, -stroke);
+        const tilt = Math.atan2(p.vy, Math.max(0.4, Math.abs(p.vx))) * 0.65 + stroke * 0.08;
+        const bobY = -stroke * 0.16;
+        const birdScale = (4.6 + r * 1.35) * (0.35 + 0.65 * birdAmount);
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.scale(facing * birdScale, birdScale);
+        ctx.rotate(tilt);
+        ctx.translate(0, bobY);
+
+        // Soft aerial glow behind flying bird
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = 0.08 * birdAmount;
+        ctx.beginPath();
+        ctx.arc(0, 0, 1.35, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Unified side-profile bird silhouette (upstroke above back, downstroke below chest)
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = 0.88 * birdAmount;
+        ctx.beginPath();
+        ctx.moveTo(-1.05, 0.42);
+
+        if (down > 0.02) {
+          // Belly transitions smoothly into downward-sweeping 3-feather wingbeat
+          ctx.quadraticCurveTo(-0.72, 0.52, -0.42, 0.55);
+          ctx.quadraticCurveTo(
+            -0.52 - 0.1 * down,
+            0.55 + 0.14 * down,
+            -0.42 - 0.18 * down,
+            0.55 + 0.28 * down
+          );
+          ctx.quadraticCurveTo(-0.36, 0.56 + 0.2 * down, -0.3, 0.56 + 0.18 * down);
+          ctx.quadraticCurveTo(
+            -0.42 - 0.18 * down,
+            0.57 + 0.38 * down,
+            -0.36 - 0.26 * down,
+            0.57 + 0.56 * down
+          );
+          ctx.quadraticCurveTo(-0.28, 0.58 + 0.44 * down, -0.22, 0.57 + 0.42 * down);
+          ctx.quadraticCurveTo(
+            -0.32 - 0.22 * down,
+            0.58 + 0.68 * down,
+            -0.22 - 0.3 * down,
+            0.58 + 0.9 * down
+          );
+          ctx.quadraticCurveTo(0.18, 0.62 + 0.22 * down, 0.44, 0.38);
+          ctx.quadraticCurveTo(0.58, 0.2, 0.64, -0.04);
+        } else {
+          ctx.bezierCurveTo(-0.32, 0.84, 0.56, 0.62, 0.64, -0.04);
+        }
+
+        // Double beak and rounded head
+        ctx.lineTo(0.96, -0.14);
+        ctx.quadraticCurveTo(0.79, -0.18, 0.72, -0.23);
+        ctx.lineTo(1.04, -0.34);
+        ctx.quadraticCurveTo(0.78, -0.32, 0.65, -0.38);
+        ctx.bezierCurveTo(0.56, -0.64, 0.18, -0.62, 0.14, -0.22);
+
+        if (up > 0.02) {
+          // Upward-swept 3-scalloped wing
+          ctx.quadraticCurveTo(-0.38 * up - 0.06, -0.24 * up - 0.06, -0.88 * up - 0.04, -0.92 * up);
+          ctx.quadraticCurveTo(-0.84 * up - 0.04, -0.58 * up, -0.62 * up - 0.08, -0.46 * up);
+          ctx.quadraticCurveTo(-0.74 * up - 0.06, -0.4 * up, -0.85 * up - 0.05, -0.42 * up);
+          ctx.quadraticCurveTo(-0.74 * up - 0.06, -0.18 * up, -0.56 * up - 0.1, -0.12 * up);
+          ctx.quadraticCurveTo(-0.66 * up - 0.08, -0.06 * up, -0.74 * up - 0.08, -0.04 * up);
+          ctx.quadraticCurveTo(-0.56, 0.14, -0.38, 0.18);
+        } else {
+          // Sleek back contour while wing beats downward
+          ctx.quadraticCurveTo(-0.14, 0.0, -0.38, 0.18);
+        }
+
+        ctx.quadraticCurveTo(-0.68, 0.34, -1.05, 0.42);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+      }
+
+      // Steady state: glowing dot nodes crossfading in as birds settle
+      if (p.morph > 0.04) {
+        // Soft outer halo (brightens during steady shimmer wave)
+        ctx.fillStyle = shimmer > 0.25 ? '#7dd3fc' : p.color;
+        ctx.globalAlpha = (0.28 + shimmer * 0.3) * p.morph;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r * (2.1 + shimmer * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+
+        // Crisp dot core
+        ctx.fillStyle = shimmer > 0.45 ? '#ffffff' : p.color;
+        ctx.globalAlpha = Math.min(1, (0.94 + shimmer * 0.06) * p.morph);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       ctx.globalAlpha = 1;
     };
@@ -469,8 +687,12 @@ export default function FlockLogoCanvas() {
             ? Math.min(1, (1 - distT / 45) * formationStrength)
             : 0;
         p.morph += (proximityMorph - p.morph) * 0.065;
+      }
 
-        drawDotParticle(p, tSec);
+      drawBrainSynapses(tSec);
+
+      for (let i = 0; i < particles.length; i++) {
+        drawParticle(particles[i], tSec);
       }
 
       animationFrameId = requestAnimationFrame(animate);
