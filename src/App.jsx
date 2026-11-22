@@ -66,7 +66,13 @@ export default function App() {
     <div className="min-h-screen bg-navy-950 text-white relative selection:bg-sky-400/30 selection:text-sky-100">
       {/* Subtle Architectural Grid Overlay & Radial Ambient Lights */}
       <div className="fixed inset-0 bg-grid-navy pointer-events-none z-0" />
-      <div className="fixed -top-48 left-1/2 -translate-x-1/2 w-[900px] h-[450px] bg-sky-500/10 blur-[150px] rounded-full pointer-events-none z-0" />
+      <div
+        className="fixed -top-48 left-1/2 -translate-x-1/2 w-[900px] h-[450px] rounded-full pointer-events-none z-0"
+        style={{
+          background:
+            'radial-gradient(ellipse at center, rgba(14, 165, 233, 0.14) 0%, rgba(14, 165, 233, 0.04) 45%, transparent 72%)',
+        }}
+      />
 
       <Navbar />
 
