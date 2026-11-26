@@ -109,12 +109,12 @@ export const EVENTS_GALLERY = [
 export const OFFICE_BEARERS = [
   {
     id: 'ob-1',
-    name: 'Prof. Ravindra De Silva',
-    role: 'Senior Treasurer / Academic Advisor',
+    name: 'Dr. W. M. K. S. Ilmini',
+    role: 'Senior Treasurer',
     tier: 'patron',
     year: 'Department of Computer Science',
     bio: 'Guiding academic excellence, strategic industry partnerships, and research integrity for the Computer Science Association.',
-    initials: 'RD',
+    initials: '',
     image:
       'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80',
     linkedin: 'https://linkedin.com',
